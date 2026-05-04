@@ -270,12 +270,12 @@ class Jobs():
         p_cell_tol:float = 0.5
     ):
         # get directory path and method 
-        if cv_mode == 11:
-            dftcp_dir = self.cluster_path + '/cpdir_std'
-            method = self.CPstd_queue
-        else:
+        if cv_mode == 12:
             dftcp_dir = self.cluster_path + '/cpdir'
             method = self.CPbraMO_queue
+        else:
+            dftcp_dir = self.cluster_path + '/cpdir_std'
+            method = self.CPstd_queue       
 
         # function for queuing chemical pressure job
         def qcp():
