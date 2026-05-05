@@ -214,17 +214,18 @@ class Jobs():
         )
 
         # queue nonlocal for dataset 1 and dataset 3
+        name = self.name + "_static"
         self.ssh.cmd_string(
             commands = [
                 f'cd {nonlocal_dir}',
-                f'{self.nonlocal_queue} *out {self.name + "_static"} 1'
+                f'{self.nonlocal_queue} {name + ".out"} {name} 1'
             ]
         )
 
         self.ssh.cmd_string(
             commands = [
                 f'cd {nonlocal_dir}',
-                f'{self.nonlocal_queue} *out {self.name + "_static"} 3'
+                f'{self.nonlocal_queue} {name + ".out"} {name} 3'
             ]
         )
     
