@@ -21,7 +21,7 @@ class QueueManager():
         # for calling qscripts
         self.qscripts = {
             'spark-login.chtc.wisc.edu':'/software/groups/fredrickson_group/qabinit7 -p pre -n 1 -c 64',
-            'kestrel.chem.wisc.edu':'/shared/apps/dfprograms/qabinit-8.10 -np 32'
+            'kestrel.chem.wisc.edu':'/share/apps/dfprograms/qabinit-8.10 -np 32'
         }
 
         # for making a new directory
@@ -106,12 +106,19 @@ class QueueManager():
 
         # stat[4] is one of PENDING, RUNNING, or COMPLETE, stat[2] is name of job
         for stat in status:
+            if stat[4] == 'PD':
+                stat[4] = 'PENDING'
+            elif stat[4] == 'R':
+                stat[4] = 'RUNNING'
+            elif stat[4] == 'C':
+                stat[4] = 'COMPLETE'
             job_stats[stat[4]].append(stat[2])
 
         # COMPLETE status does not stick around for long before it is taken off of the job status list
         # Check is job is in self.running, but now is not and add to COMPLETE if not there
+        total_jobs = [j.split('_')[0] for each_status in job_stats.values() for j in each_status]
         for job in self.running:
-            if job not in job_stats['RUNNING'] and job not in job_stats['COMPLETE']:
+            if job not in total_jobs:
                 job_stats['COMPLETE'].append(job)
 
         return job_stats
@@ -176,7 +183,7 @@ class QueueManager():
             self.ssh.cmd_string(
                 commands = [
                     f'cd {q_dir}',
-                    f'printf "{lines}" >> {name + ".in"}'
+                    f'printf "{lines}" >> {name + "_static" + ".in"}'
                 ]
             )
         
@@ -186,7 +193,7 @@ class QueueManager():
             self.ssh.cmd_string(
                 commands = [
                     f'cd {q_dir}',
-                    f'printf "{lines}" >> {name + ".files"}'
+                    f'printf "{lines}" >> {name + "_static" + ".files"}'
                 ]
             )
 
@@ -203,12 +210,15 @@ class QueueManager():
     def _QueueHandler(
         self
     ):
-        if self.queued_jobs:
+        while self.queued_jobs:
             file_on_deck = self.queued_jobs.pop()
             name = file_on_deck.split('\\')[-1]
 
+            # make new directories for jobs
+            self._CheckDir(name = name)
+
             # update running jobs
-            self.running.append(file_on_deck)
+            self.running_jobs.append(file_on_deck)
 
             if file_on_deck.endswith('.cif'):
                 # break out function to make inputs from scratch
@@ -276,11 +286,13 @@ class QueueManager():
                         self.rdrive.mkdir(compound_remote)
 
                     # save files to research drive
-                    for file in files_to_save:
-                        self.ssh.smb(
-                            remote_path = compound_remote,
-                            local_path = compound_local + f'/{file}',
-                            password = self._rdrive_password
-                        )
+                    # smbclient only available on spark
+                    if self.hpc_address.startswith('spark'):
+                        for file in files_to_save:
+                            self.ssh.smb(
+                                remote_path = compound_remote,
+                                local_path = compound_local + f'/{file}',
+                                password = self._rdrive_password
+                            )
             # increment job step after staging next step
             self.jobs[compound].step += 1
