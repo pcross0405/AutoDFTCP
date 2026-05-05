@@ -142,7 +142,6 @@ class RDrive(win32Connection):
                         files = [file_name + '.in', file_name + '.files'],
                         dir = complete_dir 
                     )
-
                     queue.append(file_name)
                 
                 elif file.endswith('.cif'):
@@ -150,7 +149,6 @@ class RDrive(win32Connection):
                         files = [file],
                         dir = complete_dir
                     )
-
                     queue.append(file)
             
         return queue
