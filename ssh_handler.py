@@ -28,25 +28,42 @@ class SSH():
         self.host = host
         self.user = user
 
-        try:
-            print(f'Attempting to connect to server: {host} via Fabric')
-
-            self.client = fb.Connection(
-                host = host,
-                user = user
-            )
-
-            print(f'User: {self.client.run("echo $USER")} successfully connected')
-            self.fabric = True
-
-        except:
-            print('Fabric connection failed, attempting to establish SSH Client with Paramiko')
-
+        if host:
             try:
-                transport = pm.Transport(host)
-                transport.connect(username=user)
-                transport.auth_interactive_dumb(username=user)
+                print(f'Attempting to connect to server: {self.host} via Fabric')
 
+                self.client = fb.Connection(
+                    host = self.host,
+                    user = user
+                )
+
+                #if self.client.is_connected:
+                print(f'User: {self.client.run("echo $USER")} successfully connected')
+                self.fabric = True
+
+            except:
+                print('Fabric connection failed, attempting to establish SSH Client with Paramiko')
+
+                try:
+                    transport = pm.Transport(host)
+                    transport.connect(username=user)
+                    transport.auth_interactive_dumb(username=user)
+                
+                except:
+                    print('Paramiko SSH Client failed.')
+                    print('Attempt manual input')
+
+                    try:
+                        password = input(f'Provide password for {self.host}: ')
+                        transport = pm.Transport(host)
+                        transport.connect(username=user,password=password)
+                        if self.host.startswith('spark'):
+                            transport.auth_interactive_dumb(username=user)
+
+                    except:
+                        print('All SSH attempts failed, exiting')
+                        raise SystemExit
+                    
                 if transport.is_authenticated:
                     print('SSH Client established')
 
@@ -54,9 +71,6 @@ class SSH():
 
                     print(f'User: {self.client.run("echo $USER")} successfully connected')
                     self.pm = True
-            
-            except:
-                pass
 
     #--------METHODS--------#
 
