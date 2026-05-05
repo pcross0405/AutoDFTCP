@@ -22,57 +22,79 @@ class SSH():
         self, 
         host:str = '',
         user:str = '',
+        fabric:bool = False,
+        paramiko:bool = False
     ):
-        self.fabric = False
-        self.pm = False
+        self.fabric = fabric
+        self.pm = paramiko
         self.host = host
         self.user = user
 
         if host:
-            try:
-                print(f'Attempting to connect to server: {self.host} via Fabric')
+            if self.fabric:
+                self._FabricConn()
 
-                self.client = fb.Connection(
-                    host = self.host,
-                    user = user
-                )
+            elif self.pm:
+                self._ParamikoConn()
 
-                #if self.client.is_connected:
-                print(f'User: {self.client.run("echo $USER")} successfully connected')
-                self.fabric = True
-
-            except:
-                print('Fabric connection failed, attempting to establish SSH Client with Paramiko')
-
+            else:
                 try:
-                    transport = pm.Transport(host)
-                    transport.connect(username=user)
-                    transport.auth_interactive_dumb(username=user)
-                
+                    self._FabricConn()
                 except:
-                    print('Paramiko SSH Client failed.')
-                    print('Attempt manual input')
-
-                    try:
-                        password = input(f'Provide password for {self.host}: ')
-                        transport = pm.Transport(host)
-                        transport.connect(username=user,password=password)
-                        if self.host.startswith('spark'):
-                            transport.auth_interactive_dumb(username=user)
-
-                    except:
-                        print('All SSH attempts failed, exiting')
-                        raise SystemExit
-                    
-                if transport.is_authenticated:
-                    print('SSH Client established')
-
-                    self.client = FabricLike(transport = transport)
-
-                    print(f'User: {self.client.run("echo $USER")} successfully connected')
-                    self.pm = True
+                    self._ParamikoConn()                   
 
     #--------METHODS--------#
+
+    # connect via Fabric
+    def _FabricConn(
+        self
+    ):
+        print(f'Attempting to connect to server: {self.host} via Fabric.')
+
+        self.client = fb.Connection(
+            host = self.host,
+            user = self.user
+        )
+
+        #if self.client.is_connected:
+        print(f'User: {self.client.run("echo $USER")} successfully connected.')
+        self.fabric = True
+
+    # connect via Paramiko
+    def _ParamikoConn(
+        self
+    ):
+        try:
+            print('Attempting to establish SSH Client with Paramiko.')
+            transport = pm.Transport(self.host)
+            transport.connect(username = self.user)
+            transport.auth_interactive_dumb(username = self.user)
+
+        # if ssh-key not set up, manually prompt user for password
+        except:
+            print('Autoconnection failed.')
+            print('Attempt manual input.')
+            try:
+                password = input(f'Provide password for {self.host}: ')
+                transport = pm.Transport(self.host)
+                transport.connect(
+                    username = self.user,
+                    password = password
+                )
+                if self.host.startswith('spark'):
+                    transport.auth_interactive_dumb(username = self.user)
+
+            except:
+                print('All SSH attempts failed, exiting.')
+                raise SystemExit
+        
+        if transport.is_authenticated:
+            print('SSH Client established.')
+
+            self.client = FabricLike(transport = transport)
+
+            print(f'User: {self.client.run("echo $USER")} successfully connected.')
+            self.pm = True
 
     # method for getting hostname
     @property
