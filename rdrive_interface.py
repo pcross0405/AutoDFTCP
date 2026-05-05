@@ -32,11 +32,12 @@ class RDrive(win32Connection):
     ):
         try:
             super().__init__(username, password, server_path)
-            self.server_path = server_path
-            self.username = username
         
         except:
             pass
+
+        self.server_path = server_path
+        self.username = username
 
     #----------METHODS----------#
 
