@@ -9,7 +9,8 @@ class QueueManager():
         rdrive_password:str = '',
         rdrive_path:str = '',
         hpc_user:str = '',
-        hpc_address:str = ''
+        hpc_address:str = '',
+        cv_mode:int = 11
     ):
         self.rdrive_user = rdrive_user
         self._rdrive_password = rdrive_password
@@ -51,12 +52,13 @@ class QueueManager():
         self.queued_jobs = self.rdrive.AutoCPFetch()
         self.running_jobs = []
         self.completed_jobs = []
+        self.error_jobs = []
 
         # create job objects to track progress of calculations
         self.jobs:dict[str,Jobs] = {}
         for job in self.queued_jobs:
             name = job.split('\\')[-1]
-            self.jobs[name] = self.ConstructJob(job_path = job)
+            self.jobs[name] = self.ConstructJob(job_path = job, cv_mode = cv_mode)
 
     #---------METHODS---------#
     # get queued jobs
@@ -79,7 +81,8 @@ class QueueManager():
         self
     )->list:
        return [compound.split('\\')[-1] for compound in self.completed_jobs] 
-    
+
+    # get current queue
     @property
     def queue_status(
         self
@@ -98,7 +101,8 @@ class QueueManager():
         job_stats = {
             'PENDING':[],
             'RUNNING':[],
-            'COMPLETE':[]
+            'COMPLETE':[],
+            'ERROR':[]
         }
 
         status = self.queue_status.split('\n')
@@ -106,7 +110,9 @@ class QueueManager():
 
         # stat[4] is one of PENDING, RUNNING, or COMPLETE, stat[2] is name of job
         for stat in status:
-            if stat[4] == 'PD':
+            if stat == []:
+                continue
+            elif stat[4] == 'PD':
                 stat[4] = 'PENDING'
             elif stat[4] == 'R':
                 stat[4] = 'RUNNING'
@@ -118,15 +124,20 @@ class QueueManager():
         # Check is job is in self.running, but now is not and add to COMPLETE if not there
         total_jobs = [j.split('_')[0] for each_status in job_stats.values() for j in each_status]
         for job in self.running:
-            if job not in total_jobs:
-                job_stats['COMPLETE'].append(job)
+            if job not in total_jobs and job not in self.error_jobs:
+                if self.jobs[job].error:
+                    self.error_jobs.append(job)
+                else:
+                    job_stats['COMPLETE'].append(job)
 
+        job_stats['ERROR'] = self.error_jobs
         return job_stats
     
     # job class construction
     def ConstructJob(
         self,
-        job_path:str
+        job_path:str,
+        cv_mode:int
     )->Jobs:
         name = job_path.split('\\')[-1]
         # check if starting from scratch or from existing input
@@ -141,7 +152,8 @@ class QueueManager():
             cluster_path = self.new_dirs[self.hpc_address] + f'/{name}',
             step = step,
             ssh_conn = self.ssh,
-            rdrive_conn = self.rdrive
+            rdrive_conn = self.rdrive,
+            cv_mode = cv_mode
         )
         return job
 
@@ -249,7 +261,17 @@ class QueueManager():
     def _CompleteHandler(
         self
     ):
+        # get status on all jobs
         status = self._JobStats
+
+        # check if all jobs have completed or errored
+        if not status['PENDING'] and not status['RUNNING'] and not status['COMPLETE']:
+            if status['ERROR']:
+                raise SystemExit(f'All jobs have completed with some errors in jobs: {status["ERROR"]}.')
+            else:
+                raise SystemExit('All jobs have completed with no errors.')
+        
+        # updated completed job steps
         while status['COMPLETE']:
             compound = status['COMPLETE'].pop()
             step = self.jobs[compound].step
@@ -280,14 +302,15 @@ class QueueManager():
                     self.completed_jobs.append(compound)
                     compound_local = local + f'/{compound}'
                     compound_remote = remote + f'/{compound}'
-                    
-                    # check if save directory on research drive exists
-                    if not self.rdrive.CheckDir(compound_remote):
-                        self.rdrive.mkdir(compound_remote)
 
                     # save files to research drive
                     # smbclient only available on spark
                     if self.hpc_address.startswith('spark'):
+
+                        # check if save directory on research drive exists
+                        if not self.rdrive.CheckDir(compound_remote):
+                            self.rdrive.mkdir(compound_remote)
+
                         for file in files_to_save:
                             self.ssh.smb(
                                 remote_path = compound_remote,
