@@ -1,5 +1,6 @@
 import fabric as fb
 import paramiko as pm
+from getpass import getpass
 
 class FabricLike():
     def __init__(
@@ -75,7 +76,7 @@ class SSH():
             print('Autoconnection failed.')
             print('Attempt manual input.')
             try:
-                password = input(f'Provide password for {self.host}: ')
+                password = getpass(f'Provide password for {self.host}: ')
                 transport = pm.Transport(self.host)
                 transport.connect(
                     username = self.user,
@@ -156,4 +157,3 @@ class SSH():
                 f"smbclient -U {self.user}@ad.wisc.edu%{password} //research.drive.wisc.edu/dcfredrickso -c 'put {local_path} {remote_path}'"
             ]
         )
-        
