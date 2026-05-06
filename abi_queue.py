@@ -164,7 +164,7 @@ class QueueManager():
         for p in self.rdrive.AutoCPFetch():
             self.queued_jobs.append(p)
             name = p.split('\\')[-1]
-            self.jobs[name] = self.ConstructJob(p)
+            self.jobs[name] = self.ConstructJob(p) #type: ignore
     
     # checker for directory
     def _CheckDir(
