@@ -1,5 +1,6 @@
 from ssh_handler import SSH
 from rdrive_interface import RDrive
+import time
 
 class Jobs():
     def __init__(
@@ -9,7 +10,8 @@ class Jobs():
         rdrive_path:str = '',
         cluster_path:str = '',
         ssh_conn:SSH = SSH(),
-        rdrive_conn:RDrive = RDrive()
+        rdrive_conn:RDrive = RDrive(),
+        cv_mode:int = 11
     ):
         self.name = name
         self.step = step
@@ -17,13 +19,30 @@ class Jobs():
         self.cluster_path = cluster_path
         self.ssh = ssh_conn
         self.rdrive = rdrive_conn
+        self.cv_mode = cv_mode
 
         # queue scripts for clusters
         self.qscripts = {
             'spark-login':
-            ['/software/groups/fredrickson_group', '/qabinit7 -p pre -n 1 -c 64', '/qnonlocal', '/qCPpackage4', '/qCPpackage', 'bin2xsf', 'qbandU_atomden'],
+            [
+                '/software/groups/fredrickson_group', 
+                '/qabinit7 -p pre -n 1 -c 64', 
+                '/qnonlocal', 
+                '/qCPpackage4', 
+                '/qCPpackage', 
+                '/bin2xsf', 
+                '/qbandU_atomden'
+            ],
             'kestrel':
-            ['/share/apps/dfprograms', '/qabinit-8.10 -np 32', '/qnonlocal', '/qCPpackge4', '/qCPpackage', 'bin2xsf', 'qbandU_atomden']
+            [
+                '/share/apps/dfprograms', 
+                '/qabinit-8.10 -np 32', 
+                '/qnonlocal', 
+                '/qCPpackage4', 
+                '/qCPpackage', 
+                '/bin2xsf', 
+                '/qbandU_atomden'
+            ]
         }
         base_queue = self.qscripts[self.ssh.hostname][0]
         self.abinit_queue = base_queue + self.qscripts[self.ssh.hostname][1]
@@ -171,6 +190,54 @@ class Jobs():
         if prev_step < 0:
             return
         
+    # check if ABINIT job completed without error
+    @property
+    def error(
+        self
+    )->bool:
+        # at step 7, then continue
+        if self.step > 6:
+            return False
+        
+        # figure out which chemical pressure directory exists
+        if self.cv_mode == 11:
+            cp_dir = '/cpdir_std'
+        else:
+            cp_dir = '/cpdir'
+
+        # dictionary of grep arguments to check if calculation completed without error
+        check_args = {
+            0:['/ecut', 'Calculation complete', '*.out'],
+            1:['/kptmesh', 'Calculation complete', '*.out'],
+            2:['/opt1', 'Calculation complete', '*.out'],
+            3:['/opt2', 'Calculation complete', '*.out'],
+            4:['/static', 'Calculation complete', '*.out'],
+            5:['/nonlocal', 'Done', '*.nonlocal'],
+            6:[cp_dir, 'calculation complete', '*cplog'],
+        }
+
+        job_path = self.cluster_path + check_args[self.step][0]
+        grep_arg1 = check_args[self.step][1]
+        grep_arg2 = check_args[self.step][2]
+
+        check = self.ssh.cmd_string(
+            commands = [
+                f'cd {job_path}',
+                f'grep "{grep_arg1}" {grep_arg2}'
+            ]
+        )
+
+        # nonlocal step has two outputs, check both
+        if check_args[self.step][0] == '/nonlocal':
+            if len(check.split('Done')) == 3:
+                return False
+            return True
+
+        # other steps have one out, make sure grep returns something
+        if check != '':
+            return False
+        return True
+        
     # general queue method for abinit jobs
     def _QueueAbinit(
         self
@@ -236,13 +303,11 @@ class Jobs():
         energy_sampling:float,
         p_cell_tol:float
     ):
-        import time
-
         # queue raMO step
         self.ssh.cmd_string(
             commands = [
                 f'cd {dftcp_dir}',
-                f'{self.raMO_queue} *.out {self.name}_static_o_DS2 1 0 {energy_sampling} {p_cell_tol}'
+                f'{self.raMO_queue} {self.name}_static.out {self.name}_static_o_DS2 1 0 {energy_sampling} {p_cell_tol}'
             ]
         )
 
@@ -257,21 +322,22 @@ class Jobs():
 
             # stat[4] is one of PENDING, RUNNING, or COMPLETE, stat[2] is name of job
             for stat in status:
-                if stat[2].startswith(f'{self.name}') and stat[4] == 'COMPLETE':
+                if stat == []:
+                    return
+                elif stat[2].startswith(f'{self.name}') and stat[4] == 'COMPLETE':
                     return
             
             # wait a minute before checking again
-            time.sleep(60)
+            time.sleep(30)
     
     # method for queuing chemical pressure job
     def _QueueChemicalPressure(
         self,
-        cv_mode:int = 11,
         energy_sampling:float = 0.5,
         p_cell_tol:float = 0.5
     ):
         # get directory path and method 
-        if cv_mode == 12:
+        if self.cv_mode == 12:
             dftcp_dir = self.cluster_path + '/cpdir'
             method = self.CPbraMO_queue
         else:
@@ -283,7 +349,7 @@ class Jobs():
             self.ssh.cmd_string(
                 commands = [
                     f'cd {dftcp_dir}',
-                    f'{method} *.out {self.name}_static'
+                    f'{method} {self.name}_static.out {self.name}_static'
                 ]
             )
             
@@ -309,7 +375,7 @@ class Jobs():
         )
 
         # if using new method (cv_mode = 12), start raMO step
-        if cv_mode == 12:
+        if self.cv_mode == 12:
             self._raMOStep(
                 dftcp_dir = dftcp_dir,
                 energy_sampling = energy_sampling,
@@ -326,9 +392,19 @@ class Jobs():
         ini_file = ini_file.split('\n')
         for i, line in enumerate(ini_file):
             if 'CV_MODE' in line:
-                ini_file[i] = f'CV_MODE {cv_mode}'
+                ini_file[i] = f'CV_MODE {self.cv_mode}'
                 break
-        
+        print(ini_file)
+        ini_file = '\n'.join(ini_file)
+        print(ini_file)
+        self.ssh.cmd_string(
+            commands = [
+                f'cd {dftcp_dir}',
+                'rm *.ini',
+                f'printf "{ini_file}" >> {self.name + "_static.ini"}'
+            ]
+        )
+    
         # if using Au, Cu, or Ag then switch semicore on
         if 'Au' in self.name or 'Ag' in self.name or 'Cu' in self.name:
             for i, line in enumerate(ini_file):
@@ -340,6 +416,8 @@ class Jobs():
         qcp()
 
         # third run only for cv_mode 11 to queue job
-        if cv_mode == 11:
+        if self.cv_mode == 11:
+            # wait some time to make sure occ files are fully made
+            time.sleep(5)
             qcp()        
  
