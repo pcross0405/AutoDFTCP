@@ -394,9 +394,15 @@ class Jobs():
             if 'CV_MODE' in line:
                 ini_file[i] = f'CV_MODE {self.cv_mode}'
                 break
-        print(ini_file)
+    
+        # if using Au, Cu, or Ag then switch semicore on
+        if 'Au' in self.name or 'Ag' in self.name or 'Cu' in self.name:
+            for i, line in enumerate(ini_file):
+                if 'Au' in line or 'Cu' in line or 'Ag' in line:
+                    ini_file[i+1] = '1'
+
+        # write ini file with changes
         ini_file = '\n'.join(ini_file)
-        print(ini_file)
         self.ssh.cmd_string(
             commands = [
                 f'cd {dftcp_dir}',
@@ -404,12 +410,6 @@ class Jobs():
                 f'printf "{ini_file}" >> {self.name + "_static.ini"}'
             ]
         )
-    
-        # if using Au, Cu, or Ag then switch semicore on
-        if 'Au' in self.name or 'Ag' in self.name or 'Cu' in self.name:
-            for i, line in enumerate(ini_file):
-                if 'Au' in line or 'Cu' in line or 'Ag' in line:
-                    ini_file[i+1] = '1'
 
         # second run, for cv_mode 12 this queues job
         # for cv_mode 11 this sets up occ files
