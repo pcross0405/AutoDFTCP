@@ -322,13 +322,11 @@ class Jobs():
 
             # stat[4] is one of PENDING, RUNNING, or COMPLETE, stat[2] is name of job
             for stat in status:
-                if stat == []:
-                    return
-                elif stat[2].startswith(f'{self.name}') and stat[4] == 'COMPLETE':
+                if self.name not in stat:
                     return
             
             # wait a minute before checking again
-            time.sleep(30)
+            time.sleep(20)
     
     # method for queuing chemical pressure job
     def _QueueChemicalPressure(
@@ -386,12 +384,14 @@ class Jobs():
         # first procedure is for standard method, requires three runs
         # first run generate .ini file
         qcp()
+        time.sleep(5)
         
         # edit .ini file
+        print([f for f in self.ssh.ls(path=dftcp_dir) if f.endswith('ini')])
         ini_file = self.ssh.cat(path = dftcp_dir + '/*.ini')
         ini_file = ini_file.split('\n')
         for i, line in enumerate(ini_file):
-            if 'CV_MODE' in line:
+            if 'CV_MODE ' in line:
                 ini_file[i] = f'CV_MODE {self.cv_mode}'
                 break
     
@@ -413,6 +413,7 @@ class Jobs():
 
         # second run, for cv_mode 12 this queues job
         # for cv_mode 11 this sets up occ files
+        time.sleep(5)
         qcp()
 
         # third run only for cv_mode 11 to queue job

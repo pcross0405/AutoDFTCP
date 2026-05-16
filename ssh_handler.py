@@ -24,12 +24,14 @@ class SSH():
         host:str = '',
         user:str = '',
         fabric:bool = False,
-        paramiko:bool = False
+        paramiko:bool = False,
+        password:str = ''
     ):
         self.fabric = fabric
         self.pm = paramiko
         self.host = host
         self.user = user
+        self._password = password
 
         if host:
             if self.fabric:
@@ -76,7 +78,9 @@ class SSH():
             print('Autoconnection failed.')
             print('Attempt manual input.')
             try:
-                password = getpass(f'Provide password for {self.host}: ')
+                password = self._password
+                if not password:
+                    password = getpass(f'Provide password for {self.host}: ')
                 transport = pm.Transport(self.host)
                 transport.connect(
                     username = self.user,
@@ -124,16 +128,17 @@ class SSH():
         self,
         path:str = '.'
     )->list:
-        dirs = self.client.run(f'ls {path}').replace('\n', ' ')
+        dirs = self.client.run(f'ls {path}', nbytes=8192).replace('\n', ' ')
         dirs = dirs.split(' ')
         return [d for d in dirs if d != '']
     
     def cmd_string(
         self,
-        commands:list
+        commands:list,
+        nbytes:int = 1024
     ):
         cmds = ';'.join(commands)
-        return self.client.run(cmds)
+        return self.client.run(cmds, nbytes = nbytes)
     
     def cat(
         self,
