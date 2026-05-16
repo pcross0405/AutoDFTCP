@@ -1,6 +1,7 @@
 from ssh_handler import SSH
 from rdrive_interface import RDrive
 from jobs import Jobs
+from getpass import getpass
 
 class QueueManager():
     def __init__(
@@ -10,13 +11,21 @@ class QueueManager():
         rdrive_path:str = '',
         hpc_user:str = '',
         hpc_address:str = '',
+        hpc_password:str ='',
         cv_mode:int = 11
     ):
+        if not rdrive_password:
+            self.rdrive_password = getpass('Provide password: ')
+        else:
+            self.rdrive_password = rdrive_password
         self.rdrive_user = rdrive_user
-        self._rdrive_password = rdrive_password
         self.rdrive_path = rdrive_path
         self.hpc_user = hpc_user
         self.hpc_address = hpc_address
+        if not hpc_password:
+            self.hpc_password = self.rdrive_password
+        else:
+            self.hpc_password = hpc_password
 
         # dicts for sourcing actions based on host address
         # for calling qscripts
@@ -33,15 +42,16 @@ class QueueManager():
 
         # establish connection to research drive
         self.rdrive = RDrive(
-            username = rdrive_user,
-            password = rdrive_password,
-            server_path = rdrive_path
+            username = self.rdrive_user,
+            password = self.rdrive_password,
+            server_path = self.rdrive_path
         )
 
         # establish connection to cluster
         self.ssh = SSH(
-            user = hpc_user,
-            host = hpc_address
+            user = self.hpc_user,
+            host = self.hpc_address,
+            password = self.hpc_password
         )
 
         # make sure autocp directory exists on cluster
@@ -89,8 +99,9 @@ class QueueManager():
     ):
         return self.ssh.cmd_string(
             commands = [
-                'squeue | grep $USER'
-            ]
+                'squeue --me --format="%14i %19P %20j %8u %2t %7M %5D %R" "$@"'
+            ],
+            nbytes = 8192
         )
     
     # get job status
@@ -107,6 +118,7 @@ class QueueManager():
 
         status = self.queue_status.split('\n')
         status = [[ch for ch in job.strip().split(' ') if ch != ''] for job in status]
+        status.pop(0)
 
         # stat[4] is one of PENDING, RUNNING, or COMPLETE, stat[2] is name of job
         for stat in status:
@@ -122,7 +134,13 @@ class QueueManager():
 
         # COMPLETE status does not stick around for long before it is taken off of the job status list
         # Check is job is in self.running, but now is not and add to COMPLETE if not there
-        total_jobs = [j.split('_')[0] for each_status in job_stats.values() for j in each_status]
+        total_jobs = []
+        for stat in status:
+            name = stat[2].split('_')
+            if len(name) > 2:
+                total_jobs.append(name[0] + '_' + name[1])
+            else:
+                total_jobs.append(name[0])
         for job in self.running:
             if job not in total_jobs and job not in self.error_jobs:
                 if self.jobs[job].error:
@@ -267,6 +285,12 @@ class QueueManager():
         # check if all jobs have completed or errored
         if not status['PENDING'] and not status['RUNNING'] and not status['COMPLETE']:
             if status['ERROR']:
+                raise SystemExit(f'All jobs have completed with some errors in jobs: {status["ERROR"]}.')
+            else:
+                raise SystemExit('All jobs have completed with no errors.')
+            
+        if len(self.completed_jobs) + len(self.error_jobs) == len(self.running_jobs):
+            if len(self.error_jobs):
                 raise SystemExit(f'All jobs have completed with some errors in jobs: {status["ERROR"]}.')
             else:
                 raise SystemExit('All jobs have completed with no errors.')
