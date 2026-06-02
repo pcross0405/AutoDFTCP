@@ -12,7 +12,9 @@ class QueueManager():
         hpc_user:str = '',
         hpc_address:str = '',
         hpc_password:str ='',
-        cv_mode:int = 11
+        cv_mode:int = 11,
+        paramiko:bool = False,
+        fabric:bool = False
     ):
         if not rdrive_password:
             self.rdrive_password = getpass('Provide password: ')
@@ -51,7 +53,9 @@ class QueueManager():
         self.ssh = SSH(
             user = self.hpc_user,
             host = self.hpc_address,
-            password = self.hpc_password
+            password = self.hpc_password,
+            paramiko = paramiko,
+            fabric = fabric
         )
 
         # make sure autocp directory exists on cluster
@@ -69,6 +73,9 @@ class QueueManager():
         for job in self.queued_jobs:
             name = job.split('\\')[-1]
             self.jobs[name] = self.ConstructJob(job_path = job, cv_mode = cv_mode)
+            while not self.jobs[name].error:
+                # update job step if calculation is already complete
+                self.jobs[name].step += 1
 
     #---------METHODS---------#
     # get queued jobs
@@ -236,6 +243,22 @@ class QueueManager():
             ]
         )
 
+    def _QueueStep(
+        self,
+        file_name:str
+    ):
+        name = file_name.strip().split('\\')[-1]
+        job = self.jobs[name]
+        if job.step < 5:
+            if job.step == 4:
+                self._QueueInput(file_name = file_name)
+            else:
+                job._QueueAbinit()
+        elif job.step == 5:
+            job._QueueNonlocal()
+        elif job.step == 6:
+            job._QueueChemicalPressure()
+
     # function for transitioning queue to running
     def _QueueHandler(
         self
@@ -256,7 +279,8 @@ class QueueManager():
 
             else:
                 # break out function to handle existing input
-                self._QueueInput(file_name = file_on_deck)
+                #self._QueueInput(file_name = file_on_deck)
+                self._QueueStep(file_name = file_on_deck)
         
     # copy files via smbclient
     def smbCopy(
@@ -272,7 +296,7 @@ class QueueManager():
         self.ssh.smb(
             remote_path = remote_path,
             local_path = local_path,
-            password = self._rdrive_password
+            password = self.rdrive_password
         )
 
     # function for transitioning running to complete
@@ -330,16 +354,11 @@ class QueueManager():
                     # save files to research drive
                     # smbclient only available on spark
                     if self.hpc_address.startswith('spark'):
-
-                        # check if save directory on research drive exists
-                        if not self.rdrive.CheckDir(compound_remote):
-                            self.rdrive.mkdir(compound_remote)
-
                         for file in files_to_save:
-                            self.ssh.smb(
+                            self.smbCopy(
                                 remote_path = compound_remote,
-                                local_path = compound_local + f'/{file}',
-                                password = self._rdrive_password
+                                local_path = compound_local + f'/{file}'
                             )
+
             # increment job step after staging next step
             self.jobs[compound].step += 1
