@@ -63,7 +63,7 @@ import time
 #
 # cv_mode = 12 for new DFT-CP method awaiting publication as of 2 June 2026
 #
-# use paramiko connection as fabric connection is still underdevelopment
+# use paramiko connection as fabric connection is still under development
 
 test = QueueManager(
     rdrive_path = r'\\research.drive.wisc.edu\dcfredrickso\AutoCP',
