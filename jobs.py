@@ -31,7 +31,8 @@ class Jobs():
                 '/qCPpackage4', 
                 '/qCPpackage', 
                 '/bin2xsf', 
-                '/qbandU_atomden'
+                '/qbandU_atomden',
+                '/qbandU_atomden_G4'
             ],
             'kestrel':
             [
@@ -41,7 +42,8 @@ class Jobs():
                 '/qCPpackage4', 
                 '/qCPpackage', 
                 '/bin2xsf', 
-                '/qbandU_atomden'
+                '/qbandU_atomden',
+                '/qbandU_atomden_G4'
             ]
         }
         base_queue = self.qscripts[self.ssh.hostname][0]
@@ -51,6 +53,7 @@ class Jobs():
         self.CPstd_queue = base_queue + self.qscripts[self.ssh.hostname][4]
         self.bin2xsf = base_queue + self.qscripts[self.ssh.hostname][5]
         self.raMO_queue = base_queue + self.qscripts[self.ssh.hostname][6]
+        self.Bessel_queue = base_queue + self.qscripts[self.ssh.hostname][7]
 
         # directories for various steps of chemical pressure calculation
         self.queue_dir = {
@@ -228,7 +231,7 @@ class Jobs():
         )
 
         # nonlocal step has two outputs, check both
-        if check_args[self.step][0] == '/nonlocal':
+        if self.step == 5:
             if len(check.split('Done')) == 3:
                 return False
             return True
@@ -297,6 +300,7 @@ class Jobs():
         )
     
     # method for creating raMO atom cells
+    # DEPRECATED 
     def _raMOStep(
         self,
         dftcp_dir:str,
@@ -328,9 +332,95 @@ class Jobs():
             # wait a minute before checking again
             time.sleep(20)
     
+    # method for writing sc_orbital file needed for Bessel function construction
+    def _SCOrbital(
+        self,
+        dftcp_dir:str
+    ):
+        # angstrom to bohr constant
+        Ang2Bohr = 1.88973
+
+        # radius for Bessel function construction, in angstrom
+        radius = 3.75
+
+        # get atomic numbers from input file
+        znucl = self.ssh.cmd_string(
+            commands = [
+                f'cd {dftcp_dir}',
+                'grep znucl *in'
+            ]
+        )
+
+        atomic_nums = [num for num in znucl.strip().split(' ') if num.isdigit()]
+
+        # construct either s, p, or d depending on the atomic number
+        sc_orbitals = {}
+        for i in atomic_nums:
+            if int(i) in [1,3,11,19,37,55]:
+                sc_orbitals[i] = '1 0 0'
+            elif int(i) in [20,38,56]:
+                sc_orbitals[i] = '1 0 1'
+            elif int(i) in [j for j in range(21,31)]:
+                sc_orbitals[i] = '1 0 1'
+            elif int(i) in [j for j in range(39,49)]:
+                sc_orbitals[i] = '1 0 1'
+            elif int(i) in [j for j in range(72,81)]:
+                sc_orbitals[i] = '1 1 1'
+            elif int(i) in [4,5,6,7,8,9,12,13,14,15,16,17,31,32,33,34,35,49,50,51,52,53,81,82,83]:
+                sc_orbitals[i] = '1 1 0'
+        
+        # concatenate construction radius and s, p, d list for all atoms
+        sc_orb_txt = ''
+        for atom in sc_orbitals:
+            sc_orb_txt += f'{radius*Ang2Bohr} ' + sc_orbitals[atom] + '\n'
+        
+        # write file
+        self.ssh.cmd_string(
+                commands = [
+                    f'cd {dftcp_dir}',
+                    f'printf "{sc_orb_txt}" >> sc_orbitals'
+                ]
+            )
+    
+    # method for constructing atom cells with Bessel function basis
+    def _BesselStep(
+        self,
+        dftcp_dir:str
+    ):
+        # make sc_orbitals file
+        self._SCOrbital(dftcp_dir = dftcp_dir)
+
+        # queue Bessel function step
+        self.ssh.cmd_string(
+            commands = [
+                f'cd {dftcp_dir}',
+                f'{self.Bessel_queue} {self.name}_static.out {self.name}_static_o_DS2 1 0 0.5 0.5'
+            ]
+        )
+
+        time.sleep(5)
+
+        while True:
+            # only return once raMO has finished
+            status = self.ssh.cmd_string(
+                commands = [
+                    'squeue | grep $USER'
+                ]
+            ).split('\n')
+            status = [[ch for ch in job.strip().split(' ') if ch != ''] for job in status]
+
+            # stat[4] is one of PENDING, RUNNING, or COMPLETE, stat[2] is name of job
+            for stat in status:
+                if self.name not in stat:
+                    return
+            
+            # wait before checking again
+            time.sleep(15)        
+    
     # method for queuing chemical pressure job
     def _QueueChemicalPressure(
         self,
+        raMO:bool = False,
         energy_sampling:float = 0.5,
         p_cell_tol:float = 0.5
     ):
@@ -350,6 +440,7 @@ class Jobs():
                     f'{method} {self.name}_static.out {self.name}_static'
                 ]
             )
+            print('running DFT-CP')
             
         # check if directory exists
         if self.ssh.check_dir(dftcp_dir):
@@ -372,22 +463,27 @@ class Jobs():
             ]
         )
 
-        # if using new method (cv_mode = 12), start raMO step
+        # call additional step of new method
         if self.cv_mode == 12:
-            self._raMOStep(
-                dftcp_dir = dftcp_dir,
-                energy_sampling = energy_sampling,
-                p_cell_tol = p_cell_tol
-            )
+            if raMO:
+                self._raMOStep(
+                    dftcp_dir = dftcp_dir,
+                    energy_sampling = energy_sampling,
+                    p_cell_tol = p_cell_tol
+                )
+            else:
+                self._BesselStep(
+                    dftcp_dir = dftcp_dir
+                )
 
         # queue chemical pressure job
         # first procedure is for standard method, requires three runs
         # first run generate .ini file
+        time.sleep(5)
         qcp()
         time.sleep(5)
         
         # edit .ini file
-        print([f for f in self.ssh.ls(path=dftcp_dir) if f.endswith('ini')])
         ini_file = self.ssh.cat(path = dftcp_dir + '/*.ini')
         ini_file = ini_file.split('\n')
         for i, line in enumerate(ini_file):
